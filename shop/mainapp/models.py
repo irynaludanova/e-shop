@@ -1,9 +1,44 @@
+import sys
+from PIL import Image
 from django.db import models
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.contenttypes.fields import GenericForeignKey
+from io import BytesIO
+from django.core.files.uploadedfile import InMemoryUploadedFile
 
 User= get_user_model()
+
+
+class MinResolutionErrorException(Exception):
+    pass
+
+
+class MaxResolutionErrorException(Exception):
+    pass
+
+
+class LatestProductsManager:
+    def get_products_for_main_page( *args, **kwargs):
+        with_resrect_to=kwargs.get('with_respect_to')
+        products=[]
+        ct_models= ContentType.objects.filter(model__in= args)
+        for ct_model in ct_models:
+            model_products= ct_model.model_class()._base_manager.all().order_by('-id')[:5]
+            products.extend(model_products)
+        if with_resrect_to:
+            ct_model= ContentType.objects.filter(model= with_resrect_to)
+            if ct_model.exists():
+                if with_resrect_to in args:
+                    return sorted(products, key=lambda x: x.__class__._meta.model_name.startswith(with_resrect_to), reverse=True)
+
+        return products
+
+
+class LatestProducts:
+
+    objects=LatestProductsManager()
+
 
 class Category(models.Model):
 
@@ -15,6 +50,9 @@ class Category(models.Model):
 
 
 class Product(models.Model):
+    MIN_RESOLUTION=(400, 400)
+    MAX_RESOLUTION=(800, 800)
+    MAX_IMAGE_SIZE =3145728
 
     class Meta:
         abstract=True
@@ -28,6 +66,26 @@ class Product(models.Model):
 
     def __str__(self):
         return self.title
+
+    def save(self, *args, **kwargs):
+        # image = self.image
+        # img= Image.open(image)
+        # min_height, min_width = self.MIN_RESOLUTION
+        # max_height, max_width = self.MAX_RESOLUTION
+        # if img.height< min_height or img.width < min_width:
+        #     raise MinResolutionErrorException('Разрешение изображения меньше минимального')
+        # if img.height> max_height or img.width > max_width:
+        #     raise MaxResolutionErrorException('Разрешение изображения больше максимального')
+        image= self.image
+        img = Image.open(image)
+        new_img =img.convert('RGB')
+        resized_new_img= new_img.resize((200, 200), Image.ANTIALIAS)
+        filestream= BytesIO()
+        resized_new_img.save(filestream, 'JPEG', quality= 90)
+        filestream.seek(0)
+        name = '{}.{}'.format(*self.image.name.split('.'))
+        self.image=InMemoryUploadedFile(filestream, 'ImageField',name, 'jpeg/image', sys.getsizeof(filestream), None )
+        super().save(*args, **kwargs)
 
 
 class Notebook(Product):
